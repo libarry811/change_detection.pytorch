@@ -114,3 +114,10 @@ venv.bak/
 
 # mypy
 .mypy_cache/
+
+#myself
+# 补充屏蔽大文件和数据集
+*.pth
+*.pt
+data/
+datasets/

@@ -16,22 +16,22 @@ model = cdp.Unet(
     fusion_form='concat',  # the form of fusing features from two branches. e.g. concat, sum, diff, or abs_diff.
 )
 
-train_dataset = LEVIR_CD_Dataset('../LEVIR-CD/train',
+train_dataset = LEVIR_CD_Dataset(r'D:\DeepLearning\dataset\LEVIR\train_cropped',
                                  sub_dir_1='A',
                                  sub_dir_2='B',
                                  img_suffix='.png',
-                                 ann_dir='../LEVIR-CD/train/label',
+                                 ann_dir=r'D:\DeepLearning\dataset\LEVIR\train_cropped\label',
                                  debug=False)
 
-valid_dataset = LEVIR_CD_Dataset('../LEVIR-CD/test',
+valid_dataset = LEVIR_CD_Dataset(r'D:\DeepLearning\dataset\LEVIR\test_cropped',
                                  sub_dir_1='A',
                                  sub_dir_2='B',
                                  img_suffix='.png',
-                                 ann_dir='../LEVIR-CD/test/label',
+                                 ann_dir=r'D:\DeepLearning\dataset\LEVIR\test_cropped\label',
                                  debug=False,
                                  test_mode=True)
 
-train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True, num_workers=0)
+train_loader = DataLoader(train_dataset, batch_size=12, shuffle=True, num_workers=0)
 valid_loader = DataLoader(valid_dataset, batch_size=1, shuffle=False, num_workers=0)
 
 loss = cdp.utils.losses.CrossEntropyLoss()
@@ -99,3 +99,8 @@ Note: if you use sliding window inference, set:
 
 """
 valid_epoch.infer_vis(valid_loader, save=True, slide=False, save_dir='./res')
+# print(f"Number of training samples: {len(train_dataset)}")
+# for i in range(len(train_dataset)):
+#     sample = train_dataset[i]
+#     print(f"Sample {i}: {sample}")
+#     break  # 只打印第一个样本
