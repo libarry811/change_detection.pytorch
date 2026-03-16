@@ -4,28 +4,6 @@
 <p align="center">
       <b>Python library with Neural Networks for Change Detection based on PyTorch.</b>
 </p>
-## Overview
-
-This project provides a Python library for change detection using neural networks based on PyTorch. It is inspired by [segmentation_models.pytorch](https://github.com/qubvel/segmentation_models.pytorch) and supports a wide range of model architectures and encoders for remote sensing change detection tasks.
-
-## Features
-
-- **Supported Architectures:** Includes Unet, Unet++, MAnet, Linknet, FPN, PSPNet, PAN, DeepLabV3, DeepLabV3+, UPerNet, STANet, and more.
-- **Encoders:** Extensive support for popular encoders such as ResNet, ResNeXt, ResNeSt, RegNet, GERNet, SE-Net, DenseNet, Inception, EfficientNet, MobileNet, DPN, and VGG, with various pre-trained weights.
-- **Datasets:** Out-of-the-box support for datasets like LEVIR-CD and SVCD.
-- **Competitions:** The library has been used successfully in change detection competitions.
-
-## Usage
-
-Refer to `local_test.py` for usage examples.
-
-## Citation
-
-If you use this library in your research, please cite the provided references.
-
-## Contact
-
-For questions or collaboration, contact likyoo@sdust.edu.cn or join the WeChat group (see QR code below).
 
 
 <img src="https://raw.githubusercontent.com/likyoo/change_detection.pytorch/main/resources/model%20architecture.png" alt="model architecture" style="zoom:80%;" />
