@@ -119,20 +119,20 @@ venv.bak/
 # 补充屏蔽大文件和数据集
 *.pth
 *.pt
-data/
-datasets/
-res/
-resUnet/
-resSTANet/
-valUntres/
-valSTANetres/
+# data/
+# datasets/
+# res/
+# resUnet/
+# resSTANet/
+# valUntres/
+# valSTANetres/
 # 忽略验证和可视化生成的输出文件夹
-generate_color_map/
-resSTANet/
-resUnet/
-valSTANetres/
-valUntres/
-Qualitative_Results/
+# generate_color_map/
+# resSTANet/
+# resUnet/
+# valSTANetres/
+# valUntres/
+# Qualitative_Results/
 
 # 忽略生成的评估指标数据文件
 *.csv
