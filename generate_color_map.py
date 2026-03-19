@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict
 
 import cv2
 import numpy as np
@@ -12,6 +12,10 @@ SUPPORTED_EXTS = (".png", ".tif", ".tiff", ".jpg", ".jpeg", ".bmp")
 
 
 def _choose_existing(candidates: list[str]) -> Path:
+	"""从候选路径中返回第一个存在的目录，否则返回第一个候选项。
+
+	这样可以兼容不同机器上的目录命名差异。
+	"""
 	for item in candidates:
 		p = Path(item)
 		if p.exists():
@@ -20,6 +24,10 @@ def _choose_existing(candidates: list[str]) -> Path:
 
 
 def _list_stems(folder: Path) -> Dict[str, Path]:
+	"""扫描文件夹中的图像文件，返回 {文件名主干: 完整路径} 映射。
+
+	使用 stem 作为键，可以方便地和标签按同名文件配对。
+	"""
 	items: Dict[str, Path] = {}
 	if not folder.exists():
 		return items
@@ -30,6 +38,13 @@ def _list_stems(folder: Path) -> Dict[str, Path]:
 
 
 def _load_binary_mask(path: Path) -> np.ndarray:
+	"""读取掩膜并统一转换为布尔数组。
+
+	支持以下输入格式：
+	- 二值图 {0, 1}
+	- 二值图 {0, 255}
+	- 非 uint8 掩膜（先归一化到 0-255 再阈值化）
+	"""
 	img = cv2.imread(str(path), cv2.IMREAD_UNCHANGED)
 	if img is None:
 		raise RuntimeError(f"Failed to read image: {path}")
@@ -44,16 +59,23 @@ def _load_binary_mask(path: Path) -> np.ndarray:
 			img = (img / max_value) * 255.0
 		img = img.astype(np.uint8)
 
-	# Supports both {0,1} and {0,255} masks.
+	# 同时兼容 {0,1} 与 {0,255} 两种二值标注格式。
 	return img > (127 if int(img.max()) > 1 else 0)
 
 
 def _build_confusion_color_map(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
+	"""根据预测与真值构建混淆可视化彩色图。
+
+	颜色约定（OpenCV 使用 BGR）：
+	- TP：白色
+	- TN：黑色
+	- FP：红色
+	- FN：绿色
+	"""
 	if pred.shape != gt.shape:
 		raise RuntimeError(f"Shape mismatch: pred {pred.shape}, gt {gt.shape}")
 
-	# BGR colors for OpenCV write:
-	# TP: white, TN: black, FP: red, FN: green
+	# OpenCV 写图使用 BGR 排列，下面按像素类别上色。
 	color = np.zeros((pred.shape[0], pred.shape[1], 3), dtype=np.uint8)
 
 	tp = np.logical_and(pred, gt)
@@ -68,77 +90,62 @@ def _build_confusion_color_map(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
 	return color
 
 
-def _stack_compare(unet_map: np.ndarray, stanet_map: np.ndarray) -> np.ndarray:
-	if unet_map.shape != stanet_map.shape:
-		raise RuntimeError("Unet and STANet map shape mismatch in compare view")
+def _ensure_dirs(base_dir: Path) -> Path:
+	"""确保输出目录存在，并返回单模型输出路径。
 
-	sep = np.full((unet_map.shape[0], 12, 3), 30, dtype=np.uint8)
-	return np.concatenate([unet_map, sep, stanet_map], axis=1)
-
-
-def _ensure_dirs(base_dir: Path) -> Tuple[Path, Path, Path]:
-	unet_out = base_dir / "unet"
-	stanet_out = base_dir / "stanet"
-	compare_out = base_dir / "compare"
-	unet_out.mkdir(parents=True, exist_ok=True)
-	stanet_out.mkdir(parents=True, exist_ok=True)
-	compare_out.mkdir(parents=True, exist_ok=True)
-	return unet_out, stanet_out, compare_out
+	当前脚本仅处理 UnetHybrid 结果，不再生成模型对比拼接图。
+	"""
+	hybrid_out = base_dir / "unet_hybrid"
+	hybrid_out.mkdir(parents=True, exist_ok=True)
+	return hybrid_out
 
 
-def generate_all(unet_dir: Path, stanet_dir: Path, label_dir: Path, out_dir: Path) -> None:
-	unet_map = _list_stems(unet_dir)
-	stanet_map = _list_stems(stanet_dir)
+def generate_all(unet_hybrid_dir: Path, label_dir: Path, out_dir: Path) -> None:
+	"""仅针对 UnetHybrid 预测结果生成 TP/TN/FP/FN 彩图。
+
+	预测图与标签图通过相同文件名主干（stem）进行配对。
+	"""
+	hybrid_map = _list_stems(unet_hybrid_dir)
 	label_map = _list_stems(label_dir)
 
-	common = sorted(set(unet_map) & set(stanet_map) & set(label_map))
+	common = sorted(set(hybrid_map) & set(label_map))
 	if not common:
-		raise RuntimeError("No paired names found across Unet/STANet/label folders")
+		raise RuntimeError("No paired names found across UnetHybrid/label folders")
 
-	unet_out, stanet_out, compare_out = _ensure_dirs(out_dir)
+	hybrid_out = _ensure_dirs(out_dir)
 
 	total = len(common)
 	print(f"Paired samples found: {total}")
 
 	for idx, name in enumerate(common, start=1):
+		# 读取 GT 与预测图，并统一成布尔掩膜。
 		gt = _load_binary_mask(label_map[name])
-		unet_pred = _load_binary_mask(unet_map[name])
-		stanet_pred = _load_binary_mask(stanet_map[name])
+		hybrid_pred = _load_binary_mask(hybrid_map[name])
 
-		unet_color = _build_confusion_color_map(unet_pred, gt)
-		stanet_color = _build_confusion_color_map(stanet_pred, gt)
-		compare = _stack_compare(unet_color, stanet_color)
+		# 生成并保存该样本的混淆彩色图。
+		hybrid_color = _build_confusion_color_map(hybrid_pred, gt)
 
-		cv2.imwrite(str(unet_out / f"{name}.png"), unet_color)
-		cv2.imwrite(str(stanet_out / f"{name}.png"), stanet_color)
-		cv2.imwrite(str(compare_out / f"{name}.png"), compare)
+		cv2.imwrite(str(hybrid_out / f"{name}.png"), hybrid_color)
 
 		if idx % 100 == 0 or idx == total:
 			print(f"Processed {idx}/{total}")
 
 	print("Done.")
-	print("Unet color maps:", unet_out)
-	print("STANet color maps:", stanet_out)
-	print("Compare maps:", compare_out)
+	print("UnetHybrid color maps:", hybrid_out)
 
 
 def parse_args() -> argparse.Namespace:
+	"""解析命令行参数（单模型 UnetHybrid 版本）。"""
 	parser = argparse.ArgumentParser(
 		description=(
-			"Generate TP/TN/FP/FN four-color maps for Unet and STANet predictions against validation labels."
+			"针对 UnetHybrid 预测结果与验证集标签，生成 TP/TN/FP/FN 四色可视化图。"
 		)
 	)
 	parser.add_argument(
-		"--unet-dir",
+		"--unet-hybrid-dir",
 		type=Path,
-		default=_choose_existing(["valUntres", "resUnet"]),
-		help="Unet prediction directory",
-	)
-	parser.add_argument(
-		"--stanet-dir",
-		type=Path,
-		default=_choose_existing(["valSTANetres", "resSTANet"]),
-		help="STANet prediction directory",
+		default=_choose_existing(["resUnetvalHybrid", "UnetHybrid"]),
+		help="UnetHybrid 预测结果目录（默认优先 resUnetvalHybrid）",
 	)
 	parser.add_argument(
 		"--label-dir",
@@ -150,13 +157,13 @@ def parse_args() -> argparse.Namespace:
 				"label",
 			]
 		),
-		help="Validation GT label directory",
+		help="验证集标签目录",
 	)
 	parser.add_argument(
 		"--out-dir",
 		type=Path,
 		default=Path(__file__).resolve().parent / Path(__file__).stem,
-		help="Output directory (default: folder with same name as this file)",
+		help="输出目录（默认：与当前脚本同名文件夹）",
 	)
 	return parser.parse_args()
 
@@ -164,14 +171,12 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
 	args = parse_args()
 
-	print("Unet dir:", args.unet_dir)
-	print("STANet dir:", args.stanet_dir)
+	print("UnetHybrid dir:", args.unet_hybrid_dir)
 	print("Label dir:", args.label_dir)
 	print("Output dir:", args.out_dir)
 
 	generate_all(
-		unet_dir=args.unet_dir,
-		stanet_dir=args.stanet_dir,
+		unet_hybrid_dir=args.unet_hybrid_dir,
 		label_dir=args.label_dir,
 		out_dir=args.out_dir,
 	)
