@@ -4,16 +4,37 @@ from torch.utils.data import DataLoader, Dataset
 import change_detection_pytorch as cdp
 from change_detection_pytorch.datasets import LEVIR_CD_Dataset, SVCD_Dataset
 from change_detection_pytorch.utils.lr_scheduler import GradualWarmupScheduler
+from change_detection_pytorch.utils.utils import seed_everything
 
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 
+# 固定随机种子，保证每次训练流程尽可能可复现
+SEED = 42
+seed_everything(SEED, workers=True, deterministic=True)
+
+# 原始配置（保留作为对照，不删除）
+# model = cdp.Unet(
+#     encoder_name="resnet34",  # 原始主干：ResNet34
+#     encoder_weights="imagenet",  # ImageNet 预训练权重
+#     in_channels=3,
+#     classes=2,
+#     siam_encoder=True,
+#     fusion_form='concat',
+# )
+
+# 新配置：仅替换 Encoder 为 MobileNetV2（收益高、改动小）
+# 说明：
+# 1) 仍然使用 UNet 解码器与原训练流程，确保改动范围只在“左半边特征提取主干”。
+# 2) encoder_name="mobilenet_v2" 对应项目内注册的 MobileNetV2Encoder，
+#    其预训练权重链接指向 PyTorch 官方发布的 mobilenet_v2 权重。
+# 3) 这样做可以利用轻量主干在参数量与推理速度上的优势，同时保持你现有代码结构稳定。
 model = cdp.Unet(
-    encoder_name="resnet34",  # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
-    encoder_weights="imagenet",  # use `imagenet` pre-trained weights for encoder initialization
-    in_channels=3,  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
-    classes=2,  # model output channels (number of classes in your datasets)
-    siam_encoder=True,  # whether to use a siamese encoder
-    fusion_form='concat',  # the form of fusing features from two branches. e.g. concat, sum, diff, or abs_diff.
+    encoder_name="mobilenet_v2",   # 替换为 MobileNetV2 主干
+    encoder_weights="imagenet",    # 使用 PyTorch 官方 ImageNet 预训练权重
+    in_channels=3,                   # 输入通道数（RGB=3）
+    classes=2,                       # 输出类别数（二分类变化检测）
+    siam_encoder=True,               # 保持 Siamese 编码结构不变
+    fusion_form='concat',            # 保持双时相特征融合方式不变
 )
 
 # model = cdp.STANet(
@@ -25,7 +46,7 @@ model = cdp.Unet(
 #     fusion_form='concat',  # 特征融合方式（如 concat, sum, diff, abs_diff）
 # )
 
-print("正在使用 STANet 模型进行训练...")
+print("正在使用 UNet + MobileNetV2(预训练) 模型进行训练...")
 
 train_dataset = LEVIR_CD_Dataset(r'D:\DeepLearning\dataset\LEVIR\train_cropped',
                                  sub_dir_1='A',

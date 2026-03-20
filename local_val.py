@@ -11,6 +11,9 @@ import cv2
 # 运行设备：优先使用 GPU，加速前向推理
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# 说明：当前脚本仅做验证推理（shuffle=False, test_mode=True），不包含随机训练增强，
+# 因此这里不额外固定随机种子；指标应保持稳定可复现。
+
 # 验证集路径
 VAL_ROOT = Path("D:/DeepLearning/dataset/LEVIR/val_cropped")
 VAL_A_PATH = VAL_ROOT / "A"
@@ -21,8 +24,9 @@ VAL_LABEL_PATH = VAL_ROOT / "label"
 # 1) 原始 Unet（交叉熵训练）
 UNET_WEIGHT_BASELINE_PATH = Path("D:/DeepLearning/change_detection.pytorch/best_model_Unet.pth")
 # 2) 新版 Unet（引入 HybridLoss: CrossEntropy + Dice）
-UNET_WEIGHT_HYBRID_PATH = Path("D:/DeepLearning/change_detection.pytorch/best_model.pth")
-
+UNET_WEIGHT_HYBRID_PATH = Path("D:/DeepLearning/change_detection.pytorch/best_model_Unet_Hybrid.pth")
+# 3）主干轻量化Unet的Encoder替换为为MobileNetV2
+UNET_WETGHT_MOBILENETV2_PATH = Path("D:/DeepLearning/change_detection.pytorch/best_model_Unet_mobilenetv2.pth")
 
 def get_val_loader(batch_size=1, num_workers=0):
     # 这里使用 test_mode=True：表示评估/推理变换（无随机裁剪增强），
@@ -53,7 +57,7 @@ def _clean_state_dict(state_dict):
     }
 
 
-def load_model(weight_path, arch):
+def load_model(weight_path, arch, encoder_name="resnet34"):
     # 兼容两类权重：
     # 1) 直接保存的完整 torch.nn.Module
     # 2) state_dict 或包含 state_dict 的 checkpoint 字典
@@ -65,7 +69,7 @@ def load_model(weight_path, arch):
         # 按验证脚本固定配置重建模型结构，再加载参数
         model = cdp.create_model(
             arch,
-            encoder_name="resnet34",
+            encoder_name=encoder_name,
             encoder_weights=None,
             in_channels=3,
             classes=2,
@@ -138,6 +142,21 @@ def _print_compare_report(base_metrics, hybrid_metrics, base_params, hybrid_para
     print(f"Delta F1-score  : {hybrid_fm['F1-score'] - base_fm['F1-score']:+.6f}")
     print(f"Delta IoU       : {hybrid_fm['IoU'] - base_fm['IoU']:+.6f}")
     print(f"Delta Params    : {hybrid_params[0] - base_params[0]:+,}")
+
+
+def _print_compare_report_with_name(base_metrics, target_metrics, base_params, target_params, target_name):
+    """打印两组结果差值（target - baseline），正值表示提升。"""
+    base_fm = _format_metrics(base_metrics)
+    target_fm = _format_metrics(target_metrics)
+
+    print(f"\n{'=' * 70}")
+    print(f"Comparison: {target_name} - Baseline-Unet")
+    print(f"{'=' * 70}")
+    print(f"Delta Precision : {target_fm['Precision'] - base_fm['Precision']:+.6f}")
+    print(f"Delta Recall    : {target_fm['Recall'] - base_fm['Recall']:+.6f}")
+    print(f"Delta F1-score  : {target_fm['F1-score'] - base_fm['F1-score']:+.6f}")
+    print(f"Delta IoU       : {target_fm['IoU'] - base_fm['IoU']:+.6f}")
+    print(f"Delta Params    : {target_params[0] - base_params[0]:+,}")
 
 
 def evaluate_model(model, dataloader, save_dir):
@@ -236,6 +255,8 @@ if __name__ == "__main__":
         raise FileNotFoundError(f"Baseline weight not found: {UNET_WEIGHT_BASELINE_PATH}")
     if not UNET_WEIGHT_HYBRID_PATH.exists():
         raise FileNotFoundError(f"Hybrid weight not found: {UNET_WEIGHT_HYBRID_PATH}")
+    if not UNET_WETGHT_MOBILENETV2_PATH.exists():
+        raise FileNotFoundError(f"MobileNetV2 weight not found: {UNET_WETGHT_MOBILENETV2_PATH}")
 
     # 评估 1：原始 Unet（best_model_Unet.pth）
     print(f"\nLoading baseline Unet weights: {UNET_WEIGHT_BASELINE_PATH}")
@@ -254,7 +275,7 @@ if __name__ == "__main__":
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    # 评估 2：HybridLoss Unet（best_model.pth）
+    # 评估 2：HybridLoss Unet（best_model_Unet_Hybrid.pth）
     print(f"\nLoading hybrid-loss Unet weights: {UNET_WEIGHT_HYBRID_PATH}")
     unet_hybrid_model = load_model(UNET_WEIGHT_HYBRID_PATH, arch="Unet")
     hybrid_total_params, hybrid_trainable_params = count_model_params(unet_hybrid_model)
@@ -268,12 +289,41 @@ if __name__ == "__main__":
         save_dir=unet_hybrid_save_dir,
     )
 
-    # 汇总对比：帮助判断优化方向
-    _print_compare_report(
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+    # 评估 3：主干替换为 MobileNetV2 的 Unet
+    print(f"\nLoading mobilenetv2-backbone Unet weights: {UNET_WETGHT_MOBILENETV2_PATH}")
+    unet_mobilenetv2_model = load_model(
+        UNET_WETGHT_MOBILENETV2_PATH,
+        arch="Unet",
+        encoder_name="mobilenet_v2",
+    )
+    mobilenetv2_total_params, mobilenetv2_trainable_params = count_model_params(unet_mobilenetv2_model)
+    unet_mobilenetv2_save_dir = "resUnetval_mobilenetv2"
+    unet_mobilenetv2_metrics = evaluate_model(unet_mobilenetv2_model, val_loader, unet_mobilenetv2_save_dir)
+    _print_model_report(
+        title="MobileNetV2-Backbone Unet (best_model_Unet_mobilenetv2.pth)",
+        metrics=unet_mobilenetv2_metrics,
+        total_params=mobilenetv2_total_params,
+        trainable_params=mobilenetv2_trainable_params,
+        save_dir=unet_mobilenetv2_save_dir,
+    )
+
+    # 汇总对比：第二个、第三个优化模型都统一相对“第一个基线模型”对比
+    _print_compare_report_with_name(
         base_metrics=unet_metrics,
-        hybrid_metrics=unet_hybrid_metrics,
+        target_metrics=unet_hybrid_metrics,
         base_params=(unet_total_params, unet_trainable_params),
-        hybrid_params=(hybrid_total_params, hybrid_trainable_params),
+        target_params=(hybrid_total_params, hybrid_trainable_params),
+        target_name="HybridLoss Unet",
+    )
+    _print_compare_report_with_name(
+        base_metrics=unet_metrics,
+        target_metrics=unet_mobilenetv2_metrics,
+        base_params=(unet_total_params, unet_trainable_params),
+        target_params=(mobilenetv2_total_params, mobilenetv2_trainable_params),
+        target_name="MobileNetV2-Backbone Unet",
     )
 
     # print(f"\nLoading STANet weights: {STANET_WEIGHT_PATH}")

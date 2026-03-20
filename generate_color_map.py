@@ -37,6 +37,17 @@ def _list_stems(folder: Path) -> Dict[str, Path]:
 	return items
 
 
+def _resolve_label_dir(label_dir: Path) -> Path:
+	"""解析标签目录。
+
+	若传入的是 `.../val_cropped`，则自动使用其下的 `label` 子目录；
+	若已传入 `.../val_cropped/label`，则直接使用。
+	"""
+	if (label_dir / "label").exists() and (label_dir / "label").is_dir():
+		return label_dir / "label"
+	return label_dir
+
+
 def _load_binary_mask(path: Path) -> np.ndarray:
 	"""读取掩膜并统一转换为布尔数组。
 
@@ -91,26 +102,28 @@ def _build_confusion_color_map(pred: np.ndarray, gt: np.ndarray) -> np.ndarray:
 
 
 def _ensure_dirs(base_dir: Path) -> Path:
-	"""确保输出目录存在，并返回单模型输出路径。
-
-	当前脚本仅处理 UnetHybrid 结果，不再生成模型对比拼接图。
-	"""
-	hybrid_out = base_dir / "unet_hybrid"
-	hybrid_out.mkdir(parents=True, exist_ok=True)
-	return hybrid_out
+	"""确保输出目录存在，并返回输出路径本身。"""
+	base_dir.mkdir(parents=True, exist_ok=True)
+	return base_dir
 
 
 def generate_all(unet_hybrid_dir: Path, label_dir: Path, out_dir: Path) -> None:
-	"""仅针对 UnetHybrid 预测结果生成 TP/TN/FP/FN 彩图。
+	"""仅针对 resUnetval_mobilenetv2 预测结果生成 TP/TN/FP/FN 彩图。
 
 	预测图与标签图通过相同文件名主干（stem）进行配对。
 	"""
+	label_dir = _resolve_label_dir(label_dir)
 	hybrid_map = _list_stems(unet_hybrid_dir)
 	label_map = _list_stems(label_dir)
 
 	common = sorted(set(hybrid_map) & set(label_map))
 	if not common:
-		raise RuntimeError("No paired names found across UnetHybrid/label folders")
+		h_pred = sorted(list(hybrid_map.keys()))[:5]
+		h_gt = sorted(list(label_map.keys()))[:5]
+		raise RuntimeError(
+			"No paired names found across resUnetval_mobilenetv2 and label folders. "
+			f"Sample pred keys: {h_pred}; sample label keys: {h_gt}"
+		)
 
 	hybrid_out = _ensure_dirs(out_dir)
 
@@ -131,39 +144,41 @@ def generate_all(unet_hybrid_dir: Path, label_dir: Path, out_dir: Path) -> None:
 			print(f"Processed {idx}/{total}")
 
 	print("Done.")
-	print("UnetHybrid color maps:", hybrid_out)
+	print("resUnetval_mobilenetv2 color maps:", hybrid_out)
 
 
 def parse_args() -> argparse.Namespace:
-	"""解析命令行参数（单模型 UnetHybrid 版本）。"""
+	"""解析命令行参数（单模型 resUnetval_mobilenetv2 版本）。"""
 	parser = argparse.ArgumentParser(
 		description=(
-			"针对 UnetHybrid 预测结果与验证集标签，生成 TP/TN/FP/FN 四色可视化图。"
+			"针对 resUnetval_mobilenetv2 预测结果与验证集标签，生成 TP/TN/FP/FN 四色可视化图。"
 		)
 	)
 	parser.add_argument(
 		"--unet-hybrid-dir",
 		type=Path,
-		default=_choose_existing(["resUnetvalHybrid", "UnetHybrid"]),
-		help="UnetHybrid 预测结果目录（默认优先 resUnetvalHybrid）",
+		default=_choose_existing(["resUnetval_mobilenetv2", "resUnet_mobilenetv2"]),
+		help="预测结果目录（默认优先 resUnetval_mobilenetv2）",
 	)
 	parser.add_argument(
 		"--label-dir",
 		type=Path,
 		default=_choose_existing(
 			[
+				"D:/DeepLearning/dataset/LEVIR/val_cropped",
 				"D:/DeepLearning/dataset/LEVIR/val_cropped/label",
+				"val_cropped",
 				"val_cropped/label",
 				"label",
 			]
 		),
-		help="验证集标签目录",
+		help="验证集目录或标签目录（若传 val_cropped 会自动使用其 label 子目录）",
 	)
 	parser.add_argument(
 		"--out-dir",
 		type=Path,
-		default=Path(__file__).resolve().parent / Path(__file__).stem,
-		help="输出目录（默认：与当前脚本同名文件夹）",
+		default=Path("resUnetval_mobilenetv2"),
+		help="输出目录（默认：resUnetval_mobilenetv2）",
 	)
 	return parser.parse_args()
 
@@ -171,7 +186,7 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
 	args = parse_args()
 
-	print("UnetHybrid dir:", args.unet_hybrid_dir)
+	print("Pred dir:", args.unet_hybrid_dir)
 	print("Label dir:", args.label_dir)
 	print("Output dir:", args.out_dir)
 
